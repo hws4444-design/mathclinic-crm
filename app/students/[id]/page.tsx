@@ -55,8 +55,12 @@ type Profile = {
     grade: string; 
     goals: string; 
     student_phone?: string;
-    parent_name?: string;
-    parent_phone?: string;
+    // 🆕 부모님 정보 분리
+    father_name?: string;
+    father_phone?: string;
+    mother_name?: string;
+    mother_phone?: string;
+    
     start_date?: string;
     consultation_notes?: string;
     class_type?: string; 
@@ -96,9 +100,8 @@ export default function StudentDetail() {
     const { data: student, error: sError } = await supabase.from('students').select('*').eq('id', id).single();
     if (sError) { console.error(sError); alert("학생 없음"); router.push("/"); return; }
     setProfile(student);
-    setEditForm(student); // 수정폼 초기화
+    setEditForm(student);
 
-    // 로그 가져오기
     const { data: logData } = await supabase.from('logs').select('*').eq('student_id', id).order('created_at', { ascending: false });
     setLogs(logData || []);
     setLoading(false);
@@ -106,11 +109,10 @@ export default function StudentDetail() {
 
   useEffect(() => { loadData(); }, [id]);
 
-  // ✅ 수업 기록 저장 (log_type: 'lesson')
+  // ✅ 수업 기록 저장
   const handleSaveLessonLog = async () => {
     if (!input.trim() && !selectedImage) return;
     
-    // 횟수제 체크 (상담 기록 제외하고 수업 기록만 카운트)
     if (profile?.class_type === 'count' && profile.total_sessions > 0 && logs.filter(l => l.log_type !== 'consultation').length >= profile.total_sessions) {
         if (!confirm("이미 정해진 수업 횟수가 끝났습니다! 그래도 추가하시겠습니까?")) return;
     }
@@ -123,7 +125,7 @@ export default function StudentDetail() {
     else alert(error.message);
   };
 
-  // ✅ 상담 기록 저장 (log_type: 'consultation')
+  // ✅ 상담 기록 저장
   const handleSaveConsultLog = async () => {
     if (!consultInput.trim()) return;
     const newLog = { 
@@ -140,7 +142,7 @@ export default function StudentDetail() {
     loadData();
   };
 
-  // ✅ 정보 수정 (목표 변경 감지 + 수업방식 설정 포함)
+  // ✅ 정보 수정 (부모님 정보 분리 저장)
   const handleUpdateProfile = async () => {
     if (profile && editForm.goals !== profile.goals) {
         await supabase.from('logs').insert([{ student_id: id, text: `🎯 학습 목표 변경: ${profile.goals} → ${editForm.goals}`, tags: ['목표변경'], log_type: 'lesson' }]);
@@ -152,13 +154,16 @@ export default function StudentDetail() {
         grade: editForm.grade,
         goals: editForm.goals,
         student_phone: editForm.student_phone,
-        parent_name: editForm.parent_name,
-        parent_phone: editForm.parent_phone,
-        // 👇 여기가 선생님이 원하신 부분들입니다!
-        consultation_notes: editForm.consultation_notes, // 신입 상담 기록
-        class_type: editForm.class_type,                 // 수업 방식 (횟수/날짜)
-        total_sessions: Number(editForm.total_sessions), // 횟수
-        end_date: editForm.end_date                      // 종료일
+        // 🆕 부/모 분리 저장
+        father_name: editForm.father_name,
+        father_phone: editForm.father_phone,
+        mother_name: editForm.mother_name,
+        mother_phone: editForm.mother_phone,
+        
+        class_type: editForm.class_type,
+        total_sessions: Number(editForm.total_sessions),
+        end_date: editForm.end_date,
+        // 신규 상담 기록은 이 창에서 삭제되었으므로 업데이트 하지 않음 (기존 데이터 유지)
     }).eq('id', id);
 
     if (!error) { setIsEditModalOpen(false); loadData(); alert("수정 완료"); }
@@ -182,11 +187,9 @@ export default function StudentDetail() {
     }
   };
 
-  // 로그 분류 (수업 vs 상담)
   const lessonLogs = logs.filter(l => l.log_type !== 'consultation');
   const consultLogs = logs.filter(l => l.log_type === 'consultation');
 
-  // AI 추천 로직
   const getRecommendation = () => {
     if (!profile) return "로딩 중...";
     const lastConsult = consultLogs[0];
@@ -203,7 +206,6 @@ export default function StudentDetail() {
     } else {
         recommendation = `💡 최근 수업 이슈가 없습니다. 학생의 현재 만족도나 진로 목표에 대해 이야기해보세요.`;
     }
-
     return { summary, recommendation };
   };
 
@@ -227,7 +229,6 @@ export default function StudentDetail() {
       <style jsx global>{` .react-calendar { border: none; width: 100%; } .dot { height: 6px; width: 6px; background-color: #3B82F6; border-radius: 50%; margin: 0 auto; } `}</style>
 
       <div className="max-w-6xl mx-auto">
-        {/* 상단 헤더 */}
         <header className="flex justify-between items-center mb-6">
             <div>
                 <Link href="/" className="text-gray-500 text-sm">← 목록으로 돌아가기</Link>
@@ -235,7 +236,6 @@ export default function StudentDetail() {
                     <h1 className="text-3xl font-bold">{profile.name}</h1>
                     <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">{profile.grade}</span>
                     
-                    {/* ✅ 결제 기준 표시 (기간제 vs 횟수제) */}
                     {profile.class_type === 'date' ? (
                         <span className="text-xs px-2 py-0.5 rounded font-bold bg-green-100 text-green-700">📅 {profile.end_date} 종료</span>
                     ) : (
@@ -246,13 +246,11 @@ export default function StudentDetail() {
                         )
                     )}
                     
-                    {/* 설정 버튼 */}
-                    <button onClick={() => setIsEditModalOpen(true)} className="text-gray-400 underline text-xs ml-2 hover:text-gray-600">⚙️ 정보/설정 수정</button>
+                    <button onClick={() => setIsEditModalOpen(true)} className="text-gray-400 underline text-xs ml-2 hover:text-gray-600">⚙️ 정보 수정</button>
                 </div>
                 <p className="text-gray-600 text-sm mt-1">{profile.school} · 🎯 {profile.goals}</p>
             </div>
             
-            {/* ✅ [따로 만든 창] 상담 기록 버튼 */}
             <button onClick={() => setIsConsultModalOpen(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-indigo-700 flex items-center gap-2">
                 💬 상담 기록 & 분석
             </button>
@@ -286,20 +284,24 @@ export default function StudentDetail() {
             </section>
 
             <section className="lg:col-span-2 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border">
-                        <h3 className="font-bold mb-3 text-sm text-gray-700">📞 연락처 정보</h3>
-                        <div className="space-y-2 text-sm">
-                            <div className="flex justify-between"><span className="text-gray-500">학생</span><span className="font-bold">{profile.student_phone || "-"}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">학부모 ({profile.parent_name})</span><span className="font-bold">{profile.parent_phone || "-"}</span></div>
+                {/* 🆕 연락처 카드 (부/모 분리해서 보여주기) */}
+                <div className="bg-white p-5 rounded-xl shadow-sm border">
+                    <h3 className="font-bold mb-3 text-sm text-gray-700">📞 연락처 정보</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="p-3 bg-gray-50 rounded">
+                            <span className="block text-xs text-gray-500 mb-1">학생</span>
+                            <span className="font-bold">{profile.student_phone || "-"}</span>
                         </div>
-                    </div>
-                    {/* 신입 상담 기록 미리보기 (수정 불가, 보기 전용) */}
-                    <div className="bg-gray-50 p-5 rounded-xl shadow-sm border border-gray-200">
-                         <h3 className="font-bold mb-2 text-sm text-gray-800">📝 신규 상담 기록 (초기)</h3>
-                         <p className="text-sm text-gray-600 line-clamp-2">
-                            {profile.consultation_notes || "기록 없음. 설정(⚙️)에서 입력하세요."}
-                         </p>
+                        <div className="p-3 bg-blue-50 rounded">
+                            <span className="block text-xs text-blue-500 mb-1">부 (아버지)</span>
+                            <span className="block font-bold">{profile.father_name || "-"}</span>
+                            <span className="block text-gray-600 text-xs">{profile.father_phone || "-"}</span>
+                        </div>
+                        <div className="p-3 bg-pink-50 rounded">
+                            <span className="block text-xs text-pink-500 mb-1">모 (어머니)</span>
+                            <span className="block font-bold">{profile.mother_name || "-"}</span>
+                            <span className="block text-gray-600 text-xs">{profile.mother_phone || "-"}</span>
+                        </div>
                     </div>
                 </div>
 
@@ -335,12 +337,11 @@ export default function StudentDetail() {
         </div>
       </div>
       
-      {/* ✅ [따로 만든 창] 상담 전용 모달 */}
+      {/* 상담 전용 모달 */}
       {isConsultModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
-            <div className="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
-                {/* 왼쪽: 날짜별 상담 히스토리 */}
-                <div className="w-full md:w-1/3 bg-gray-50 border-r p-6 overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 md:p-4">
+            <div className="bg-white w-full h-full md:max-w-4xl md:h-[85vh] md:rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
+                <div className="w-full md:w-1/3 bg-gray-50 border-r p-6 overflow-y-auto hidden md:block">
                     <h3 className="font-bold text-lg mb-4 text-gray-800">📂 상담 히스토리</h3>
                     <div className="space-y-4">
                         {consultLogs.length === 0 ? <p className="text-gray-400 text-sm">기록이 없습니다.</p> : consultLogs.map(log => (
@@ -354,85 +355,86 @@ export default function StudentDetail() {
                         ))}
                     </div>
                 </div>
-                {/* 오른쪽: 입력 및 AI 분석 */}
-                <div className="w-full md:w-2/3 p-6 flex flex-col bg-white">
+                <div className="w-full md:w-2/3 p-6 flex flex-col bg-white h-full">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-xl font-bold">💬 상담 기록 & AI 분석</h2>
-                        <button onClick={() => setIsConsultModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕ 닫기</button>
+                        <button onClick={() => setIsConsultModalOpen(false)} className="text-gray-500 hover:text-gray-800 p-2">✕ 닫기</button>
                     </div>
-                    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100 mb-6">
+                    <div className="md:hidden mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-500">* 과거 기록은 PC화면에서 전체 조회 가능</div>
+                    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100 mb-6 shrink-0">
                         <div className="mb-4 pb-4 border-b border-indigo-100">
                             <h4 className="text-xs font-bold text-indigo-500 uppercase mb-1">Summary (지난 상담)</h4>
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{typeof smartData === 'object' ? smartData.summary : smartData}</p>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-2">{typeof smartData === 'object' ? smartData.summary : smartData}</p>
                         </div>
                         <div>
                             <h4 className="text-xs font-bold text-purple-500 uppercase mb-1">AI Recommendation (추천 질문)</h4>
-                            <p className="text-sm font-bold text-purple-800">{typeof smartData === 'object' ? smartData.recommendation : ""}</p>
+                            <p className="text-sm font-bold text-purple-800 line-clamp-3">{typeof smartData === 'object' ? smartData.recommendation : ""}</p>
                         </div>
                     </div>
-                    <div className="flex-1 flex flex-col">
+                    <div className="flex-1 flex flex-col min-h-0">
                         <label className="text-sm font-bold text-gray-700 mb-2">오늘 상담 내용</label>
-                        <textarea 
-                            className="flex-1 w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-gray-50 text-base"
-                            placeholder="상담 내용을 기록하세요..." value={consultInput} onChange={(e) => setConsultInput(e.target.value)}
-                        />
-                        <div className="mt-4 flex justify-end">
-                            <button onClick={handleSaveConsultLog} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex items-center gap-2">✨ 상담 저장하기</button>
-                        </div>
+                        <textarea className="flex-1 w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-gray-50 text-base mb-4" placeholder="상담 내용을 기록하세요..." value={consultInput} onChange={(e) => setConsultInput(e.target.value)} />
+                        <button onClick={handleSaveConsultLog} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">✨ 상담 저장하기</button>
                     </div>
                 </div>
             </div>
         </div>
       )}
 
-      {/* ✅ 설정(수정) 모달 - 여기에 다 있습니다! */}
+      {/* ✅ 수정 모달 (UI 개선 반영) */}
       {isEditModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white p-6 rounded-xl w-full max-w-sm shadow-2xl h-[90vh] overflow-y-auto">
-                  <h2 className="font-bold text-lg mb-4">학생 정보/설정 수정</h2>
-                  <div className="space-y-3">
-                      <div><label className="text-xs text-gray-500">이름</label><input className="w-full border p-2 rounded" value={editForm.name || ""} onChange={(e) => setEditForm({...editForm, name: e.target.value})} /></div>
+                  <h2 className="font-bold text-lg mb-4">학생 정보 수정</h2>
+                  
+                  {/* 학생 기본 정보 */}
+                  <div className="bg-gray-50 p-3 rounded mb-3 space-y-2">
+                      <h3 className="text-xs font-bold text-gray-500">학생 정보</h3>
                       <div className="grid grid-cols-2 gap-2">
-                          <div><label className="text-xs text-gray-500">학교</label><input className="w-full border p-2 rounded" value={editForm.school || ""} onChange={(e) => setEditForm({...editForm, school: e.target.value})} /></div>
-                          <div><label className="text-xs text-gray-500">학년</label><input className="w-full border p-2 rounded" value={editForm.grade || ""} onChange={(e) => setEditForm({...editForm, grade: e.target.value})} /></div>
+                        <div><label className="text-xs text-gray-400">이름</label><input className="w-full border p-2 rounded" value={editForm.name || ""} onChange={(e) => setEditForm({...editForm, name: e.target.value})} /></div>
+                        <div><label className="text-xs text-gray-400">학생 폰</label><input className="w-full border p-2 rounded" value={editForm.student_phone || ""} onChange={(e) => setEditForm({...editForm, student_phone: e.target.value})} /></div>
                       </div>
-                      
-                      <div className="bg-gray-50 p-2 rounded space-y-2">
-                        <div><label className="text-xs text-gray-500">학생 폰</label><input className="w-full border p-2 rounded" value={editForm.student_phone || ""} onChange={(e) => setEditForm({...editForm, student_phone: e.target.value})} /></div>
-                        <div><label className="text-xs text-gray-500">학부모 폰</label><input className="w-full border p-2 rounded" value={editForm.parent_phone || ""} onChange={(e) => setEditForm({...editForm, parent_phone: e.target.value})} /></div>
-                        <div><label className="text-xs text-gray-500">학부모명</label><input className="w-full border p-2 rounded" value={editForm.parent_name || ""} onChange={(e) => setEditForm({...editForm, parent_name: e.target.value})} /></div>
-                      </div>
-
-                      <div className="bg-yellow-50 p-2 rounded border border-yellow-200">
-                          <label className="text-xs text-yellow-800 font-bold mb-1 block">🎯 현재 학습 목표 (변경 시 자동 기록)</label>
-                          <input className="w-full border border-yellow-300 p-2 rounded font-bold text-gray-700" value={editForm.goals || ""} onChange={(e) => setEditForm({...editForm, goals: e.target.value})} />
-                      </div>
-
-                      {/* ✅ 선생님이 찾으시던 [수업 방식 선택] 기능 */}
-                      <div className="bg-blue-50 p-2 rounded border border-blue-200">
-                          <label className="text-xs text-blue-700 font-bold mb-1 block">💰 수업 방식 (결제 기준)</label>
-                          <div className="flex gap-2 mb-2">
-                            <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={editForm.class_type === 'count'} onChange={() => setEditForm({...editForm, class_type: 'count'})} /> 횟수제</label>
-                            <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={editForm.class_type === 'date'} onChange={() => setEditForm({...editForm, class_type: 'date'})} /> 기간제</label>
-                          </div>
-                          {editForm.class_type === 'date' ? (
-                             <div><label className="text-xs text-gray-500">종료 날짜</label><input type="date" className="w-full border p-1 rounded" value={editForm.end_date || ""} onChange={(e) => setEditForm({...editForm, end_date: e.target.value})} /></div>
-                          ) : (
-                             <div><label className="text-xs text-gray-500">총 횟수</label><input type="number" className="w-full border p-1 rounded" value={editForm.total_sessions || 0} onChange={(e) => setEditForm({...editForm, total_sessions: e.target.value})} /></div>
-                          )}
-                      </div>
-                      
-                      {/* ✅ 선생님이 찾으시던 [신입 상담 기록] 칸 */}
-                      <div className="bg-purple-50 p-2 rounded border border-purple-200">
-                          <label className="text-xs text-purple-700 font-bold mb-1 block">📝 신규 상담 기록 (초기)</label>
-                          <textarea 
-                             className="w-full border p-2 rounded h-24 text-sm resize-none" 
-                             placeholder="첫 등원 시 상담했던 내용을 적어두세요."
-                             value={editForm.consultation_notes || ""} 
-                             onChange={(e) => setEditForm({...editForm, consultation_notes: e.target.value})} 
-                          />
+                      <div className="grid grid-cols-2 gap-2">
+                          <div><label className="text-xs text-gray-400">학교</label><input className="w-full border p-2 rounded" value={editForm.school || ""} onChange={(e) => setEditForm({...editForm, school: e.target.value})} /></div>
+                          <div><label className="text-xs text-gray-400">학년</label><input className="w-full border p-2 rounded" value={editForm.grade || ""} onChange={(e) => setEditForm({...editForm, grade: e.target.value})} /></div>
                       </div>
                   </div>
+                  
+                  {/* 🆕 학부모 정보 (부/모 분리) */}
+                  <div className="bg-orange-50 p-3 rounded mb-3 space-y-2 border border-orange-100">
+                    <h3 className="text-xs font-bold text-orange-600">학부모 정보</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-gray-400">부(父) 성함</label><input className="w-full border p-2 rounded" value={editForm.father_name || ""} onChange={(e) => setEditForm({...editForm, father_name: e.target.value})} /></div>
+                        <div><label className="text-xs text-gray-400">부 연락처</label><input className="w-full border p-2 rounded" value={editForm.father_phone || ""} onChange={(e) => setEditForm({...editForm, father_phone: e.target.value})} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-gray-400">모(母) 성함</label><input className="w-full border p-2 rounded" value={editForm.mother_name || ""} onChange={(e) => setEditForm({...editForm, mother_name: e.target.value})} /></div>
+                        <div><label className="text-xs text-gray-400">모 연락처</label><input className="w-full border p-2 rounded" value={editForm.mother_phone || ""} onChange={(e) => setEditForm({...editForm, mother_phone: e.target.value})} /></div>
+                    </div>
+                  </div>
+
+                  {/* 목표 */}
+                  <div className="bg-yellow-50 p-3 rounded border border-yellow-200 mb-3">
+                      <label className="text-xs text-yellow-800 font-bold mb-1 block">🎯 학습 목표</label>
+                      <input className="w-full border border-yellow-300 p-2 rounded font-bold text-gray-700" value={editForm.goals || ""} onChange={(e) => setEditForm({...editForm, goals: e.target.value})} />
+                  </div>
+
+                  {/* 수업 방식 */}
+                  <div className="bg-blue-50 p-3 rounded border border-blue-200 mb-3">
+                      <label className="text-xs text-blue-700 font-bold mb-1 block">💰 수업 방식</label>
+                      <div className="flex gap-2 mb-2">
+                        <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={editForm.class_type === 'count'} onChange={() => setEditForm({...editForm, class_type: 'count'})} /> 횟수제</label>
+                        <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={editForm.class_type === 'date'} onChange={() => setEditForm({...editForm, class_type: 'date'})} /> 기간제</label>
+                      </div>
+                      {editForm.class_type === 'date' ? (
+                         <div><label className="text-xs text-gray-500">종료 날짜</label><input type="date" className="w-full border p-1 rounded" value={editForm.end_date || ""} onChange={(e) => setEditForm({...editForm, end_date: e.target.value})} /></div>
+                      ) : (
+                         <div><label className="text-xs text-gray-500">총 횟수</label><input type="number" className="w-full border p-1 rounded" value={editForm.total_sessions || 0} onChange={(e) => setEditForm({...editForm, total_sessions: e.target.value})} /></div>
+                      )}
+                  </div>
+                  
+                  {/* ❌ 신규 상담 기록(초기) 삭제됨 */}
+                  
                   <div className="mt-6 flex gap-2">
                       <button onClick={() => setIsEditModalOpen(false)} className="flex-1 bg-gray-100 py-2 rounded text-sm hover:bg-gray-200">취소</button>
                       <button onClick={handleUpdateProfile} className="flex-1 bg-blue-600 text-white py-2 rounded text-sm font-bold hover:bg-blue-700">저장</button>
