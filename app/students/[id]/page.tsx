@@ -55,12 +55,10 @@ type Profile = {
     grade: string; 
     goals: string; 
     student_phone?: string;
-    // 🆕 부모님 정보 분리
     father_name?: string;
     father_phone?: string;
     mother_name?: string;
     mother_phone?: string;
-    
     start_date?: string;
     consultation_notes?: string;
     class_type?: string; 
@@ -91,6 +89,7 @@ export default function StudentDetail() {
   
   // 상담 입력 상태
   const [consultInput, setConsultInput] = useState("");
+  const [consultGoal, setConsultGoal] = useState(""); // 🆕 상담창용 목표 상태
 
   // ✅ 데이터 불러오기
   const loadData = async () => {
@@ -101,6 +100,7 @@ export default function StudentDetail() {
     if (sError) { console.error(sError); alert("학생 없음"); router.push("/"); return; }
     setProfile(student);
     setEditForm(student);
+    setConsultGoal(student.goals || ""); // 목표 초기값 설정
 
     const { data: logData } = await supabase.from('logs').select('*').eq('student_id', id).order('created_at', { ascending: false });
     setLogs(logData || []);
@@ -125,15 +125,41 @@ export default function StudentDetail() {
     else alert(error.message);
   };
 
-  // ✅ 상담 기록 저장
+  // ✅ 상담 및 목표 저장 (핵심 기능 변경!)
   const handleSaveConsultLog = async () => {
-    if (!consultInput.trim()) return;
-    const newLog = { 
-      student_id: id, text: consultInput, tags: [], log_type: 'consultation' 
-    };
-    const { error } = await supabase.from('logs').insert([newLog]);
-    if (!error) { setConsultInput(""); loadData(); alert("상담 내용이 저장되었습니다."); }
-    else alert(error.message);
+    // 1. 목표 변경 감지
+    const isGoalChanged = profile && consultGoal !== profile.goals;
+    let goalMsg = "";
+
+    if (isGoalChanged) {
+        // DB 업데이트
+        await supabase.from('students').update({ goals: consultGoal }).eq('id', id);
+        // 목표 변경 로그 생성 (consultation 타입으로 저장하여 히스토리에 표시)
+        await supabase.from('logs').insert([{ 
+            student_id: id, 
+            text: `🎯 학습 목표 변경: ${profile?.goals} → ${consultGoal}`, 
+            tags: ['목표변경'], 
+            log_type: 'consultation' 
+        }]);
+        goalMsg = "목표가 변경되었습니다.";
+    }
+
+    // 2. 상담 내용 저장 (내용이 있을 때만)
+    if (consultInput.trim()) {
+        const { error } = await supabase.from('logs').insert([{ 
+            student_id: id, 
+            text: consultInput, 
+            tags: [], 
+            log_type: 'consultation' 
+        }]);
+        if (error) return alert(error.message);
+    } else if (!isGoalChanged) {
+        return; // 내용도 없고 목표도 안 바꿨으면 아무것도 안 함
+    }
+
+    setConsultInput(""); 
+    loadData(); 
+    alert(`저장되었습니다. ${goalMsg}`);
   };
 
   const handleDeleteLog = async (logId: number) => {
@@ -142,28 +168,21 @@ export default function StudentDetail() {
     loadData();
   };
 
-  // ✅ 정보 수정 (부모님 정보 분리 저장)
+  // ✅ 정보 수정 (목표 관련 로직 삭제 -> 상담창으로 이동)
   const handleUpdateProfile = async () => {
-    if (profile && editForm.goals !== profile.goals) {
-        await supabase.from('logs').insert([{ student_id: id, text: `🎯 학습 목표 변경: ${profile.goals} → ${editForm.goals}`, tags: ['목표변경'], log_type: 'lesson' }]);
-    }
-    
     const { error } = await supabase.from('students').update({
         name: editForm.name,
         school: editForm.school,
         grade: editForm.grade,
-        goals: editForm.goals,
+        // goals는 여기서 수정 안 함
         student_phone: editForm.student_phone,
-        // 🆕 부/모 분리 저장
         father_name: editForm.father_name,
         father_phone: editForm.father_phone,
         mother_name: editForm.mother_name,
         mother_phone: editForm.mother_phone,
-        
         class_type: editForm.class_type,
         total_sessions: Number(editForm.total_sessions),
         end_date: editForm.end_date,
-        // 신규 상담 기록은 이 창에서 삭제되었으므로 업데이트 하지 않음 (기존 데이터 유지)
     }).eq('id', id);
 
     if (!error) { setIsEditModalOpen(false); loadData(); alert("수정 완료"); }
@@ -202,9 +221,9 @@ export default function StudentDetail() {
     
     let recommendation = "";
     if (uniqueTags.length > 0) {
-        recommendation = `💡 최근 수업에서 [${uniqueTags.join(', ')}] 관련 이슈가 있었습니다. 가정 학습 진행 상황을 확인해보세요.`;
+        recommendation = `💡 최근 수업에서 [${uniqueTags.join(', ')}] 관련 이슈가 있었습니다.`;
     } else {
-        recommendation = `💡 최근 수업 이슈가 없습니다. 학생의 현재 만족도나 진로 목표에 대해 이야기해보세요.`;
+        recommendation = `💡 최근 수업 이슈가 없습니다. 진로 목표에 대해 이야기해보세요.`;
     }
     return { summary, recommendation };
   };
@@ -284,7 +303,6 @@ export default function StudentDetail() {
             </section>
 
             <section className="lg:col-span-2 space-y-4">
-                {/* 🆕 연락처 카드 (부/모 분리해서 보여주기) */}
                 <div className="bg-white p-5 rounded-xl shadow-sm border">
                     <h3 className="font-bold mb-3 text-sm text-gray-700">📞 연락처 정보</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -337,30 +355,44 @@ export default function StudentDetail() {
         </div>
       </div>
       
-      {/* 상담 전용 모달 */}
+      {/* 🆕 상담 전용 모달 */}
       {isConsultModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 md:p-4">
             <div className="bg-white w-full h-full md:max-w-4xl md:h-[85vh] md:rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
                 <div className="w-full md:w-1/3 bg-gray-50 border-r p-6 overflow-y-auto hidden md:block">
                     <h3 className="font-bold text-lg mb-4 text-gray-800">📂 상담 히스토리</h3>
                     <div className="space-y-4">
-                        {consultLogs.length === 0 ? <p className="text-gray-400 text-sm">기록이 없습니다.</p> : consultLogs.map(log => (
-                            <div key={log.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">{new Date(log.created_at).toLocaleDateString()}</span>
-                                    <button onClick={() => handleDeleteLog(log.id)} className="text-gray-300 hover:text-red-500 text-xs">삭제</button>
+                        {consultLogs.length === 0 ? <p className="text-gray-400 text-sm">기록이 없습니다.</p> : consultLogs.map(log => {
+                            // 목표 변경 로그인지 확인
+                            const isGoalLog = log.tags?.includes('목표변경');
+                            return (
+                                <div key={log.id} className={`p-4 rounded-lg shadow-sm border ${isGoalLog ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${isGoalLog ? 'text-yellow-700 bg-yellow-100' : 'text-indigo-600 bg-indigo-50'}`}>{new Date(log.created_at).toLocaleDateString()}</span>
+                                        <button onClick={() => handleDeleteLog(log.id)} className="text-gray-300 hover:text-red-500 text-xs">삭제</button>
+                                    </div>
+                                    <p className={`text-sm whitespace-pre-wrap ${isGoalLog ? 'font-bold text-gray-800' : 'text-gray-700'}`}>{log.text}</p>
                                 </div>
-                                <p className="text-sm text-gray-700 whitespace-pre-wrap">{log.text}</p>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
                 <div className="w-full md:w-2/3 p-6 flex flex-col bg-white h-full">
                     <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-xl font-bold">💬 상담 기록 & AI 분석</h2>
+                        <h2 className="text-xl font-bold">💬 상담 기록 & 목표 설정</h2>
                         <button onClick={() => setIsConsultModalOpen(false)} className="text-gray-500 hover:text-gray-800 p-2">✕ 닫기</button>
                     </div>
-                    <div className="md:hidden mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-500">* 과거 기록은 PC화면에서 전체 조회 가능</div>
+                    
+                    {/* 🆕 목표 설정 (여기로 이동됨!) */}
+                    <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 mb-4 shadow-sm shrink-0">
+                        <label className="text-xs text-yellow-800 font-bold mb-1 block">🎯 현재 학습 목표 (변경 후 저장하면 자동 기록)</label>
+                        <input 
+                            className="w-full border border-yellow-300 p-2 rounded font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-yellow-400" 
+                            value={consultGoal} 
+                            onChange={(e) => setConsultGoal(e.target.value)} 
+                        />
+                    </div>
+
                     <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100 mb-6 shrink-0">
                         <div className="mb-4 pb-4 border-b border-indigo-100">
                             <h4 className="text-xs font-bold text-indigo-500 uppercase mb-1">Summary (지난 상담)</h4>
@@ -371,23 +403,23 @@ export default function StudentDetail() {
                             <p className="text-sm font-bold text-purple-800 line-clamp-3">{typeof smartData === 'object' ? smartData.recommendation : ""}</p>
                         </div>
                     </div>
+                    
                     <div className="flex-1 flex flex-col min-h-0">
                         <label className="text-sm font-bold text-gray-700 mb-2">오늘 상담 내용</label>
                         <textarea className="flex-1 w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-gray-50 text-base mb-4" placeholder="상담 내용을 기록하세요..." value={consultInput} onChange={(e) => setConsultInput(e.target.value)} />
-                        <button onClick={handleSaveConsultLog} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">✨ 상담 저장하기</button>
+                        <button onClick={handleSaveConsultLog} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">✨ 상담 및 목표 저장하기</button>
                     </div>
                 </div>
             </div>
         </div>
       )}
 
-      {/* ✅ 수정 모달 (UI 개선 반영) */}
+      {/* 수정 모달 (목표 삭제됨) */}
       {isEditModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white p-6 rounded-xl w-full max-w-sm shadow-2xl h-[90vh] overflow-y-auto">
                   <h2 className="font-bold text-lg mb-4">학생 정보 수정</h2>
                   
-                  {/* 학생 기본 정보 */}
                   <div className="bg-gray-50 p-3 rounded mb-3 space-y-2">
                       <h3 className="text-xs font-bold text-gray-500">학생 정보</h3>
                       <div className="grid grid-cols-2 gap-2">
@@ -400,7 +432,6 @@ export default function StudentDetail() {
                       </div>
                   </div>
                   
-                  {/* 🆕 학부모 정보 (부/모 분리) */}
                   <div className="bg-orange-50 p-3 rounded mb-3 space-y-2 border border-orange-100">
                     <h3 className="text-xs font-bold text-orange-600">학부모 정보</h3>
                     <div className="grid grid-cols-2 gap-2">
@@ -413,13 +444,8 @@ export default function StudentDetail() {
                     </div>
                   </div>
 
-                  {/* 목표 */}
-                  <div className="bg-yellow-50 p-3 rounded border border-yellow-200 mb-3">
-                      <label className="text-xs text-yellow-800 font-bold mb-1 block">🎯 학습 목표</label>
-                      <input className="w-full border border-yellow-300 p-2 rounded font-bold text-gray-700" value={editForm.goals || ""} onChange={(e) => setEditForm({...editForm, goals: e.target.value})} />
-                  </div>
+                  {/* 🚫 목표 입력칸 삭제됨 */}
 
-                  {/* 수업 방식 */}
                   <div className="bg-blue-50 p-3 rounded border border-blue-200 mb-3">
                       <label className="text-xs text-blue-700 font-bold mb-1 block">💰 수업 방식</label>
                       <div className="flex gap-2 mb-2">
@@ -432,8 +458,6 @@ export default function StudentDetail() {
                          <div><label className="text-xs text-gray-500">총 횟수</label><input type="number" className="w-full border p-1 rounded" value={editForm.total_sessions || 0} onChange={(e) => setEditForm({...editForm, total_sessions: e.target.value})} /></div>
                       )}
                   </div>
-                  
-                  {/* ❌ 신규 상담 기록(초기) 삭제됨 */}
                   
                   <div className="mt-6 flex gap-2">
                       <button onClick={() => setIsEditModalOpen(false)} className="flex-1 bg-gray-100 py-2 rounded text-sm hover:bg-gray-200">취소</button>
